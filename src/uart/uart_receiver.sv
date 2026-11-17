@@ -46,7 +46,6 @@ module uart_receiver #(
     logic majority_result;
     logic [DATA_WIDTH-1:0] rx_data;
     logic [DATA_COUNTER_WIDTH-1:0] data_bit_counter;
-    logic start_bit_valid;
     logic rx_meta;
     logic rx_sync;
     logic rx_sync_previous;
@@ -110,9 +109,9 @@ module uart_receiver #(
                 end
             end
             START_BIT_STAGE: begin
-                if (start_bit_valid && start_bit_checked) begin
+                if (majority_result == 1'd0 && start_bit_checked) begin
                     next_state = DATA_BITS_STAGE;
-                end else if (start_bit_checked && !start_bit_valid) begin
+                end else if (start_bit_checked && majority_result == 1'd1) begin
                     next_state = IDLE;
                 end
             end
@@ -170,28 +169,6 @@ module uart_receiver #(
 
     always_ff @(posedge clk or negedge nRESET) begin
         if (!nRESET) begin
-            start_bit_valid <= 1'd0;
-        end else begin
-            if (state == IDLE && next_state == START_BIT_STAGE) begin
-                start_bit_valid <= 1'd0;
-            end // implement start bit validation logic here
-        end
-    end
-
-    always_ff @(posedge clk or negedge nRESET) begin
-        if (!nRESET) begin
-            start_bit_checked <= 1'd0;
-            stop_bits_checked <= 1'd0;
-            parity_bit_checked <= 1'd0;
-        end else if (state == IDLE && start_edge) begin
-            start_bit_checked <= 1'd0;
-            stop_bits_checked <= 1'd0;
-            parity_bit_checked <= 1'd0;
-        end
-    end
-
-    always_ff @(posedge clk or negedge nRESET) begin
-        if (!nRESET) begin
             phase_accumulator <= 1'd0;
             sample_tick <= 1'd0;
         end else begin
@@ -219,6 +196,73 @@ module uart_receiver #(
                 oversampling_counter <= oversampling_counter + 1'd1;
             end else begin
                 oversampling_counter <= 1'd0;
+            end
+        end
+    end
+
+    always_ff @(posedge clk or negedge nRESET) begin
+        if (!nRESET) begin
+            majority_ready <= 1'd0;
+            majority_result <= 1'd0;
+            high_sample_count <= 2'd0;
+            start_bit_checked <= 1'd0;
+            data_bit_counter <= 1'd0;
+            rx_data <= 1'd0;
+        end else begin
+            majority_ready <= 1'd0;
+            if (state == IDLE && next_state == START_BIT_STAGE) begin
+                start_bit_checked <= 1'd0;
+                high_sample_count <= 1'd0;
+                majority_result <= 1'd0;
+                data_bit_counter <= 1'd0;
+                rx_data <= 1'd0;
+            end else if (sample_tick && state == START_BIT_STAGE) begin
+                if ((oversampling_counter+1 == MID_SAMPLE-1) || (oversampling_counter+1 == MID_SAMPLE)) begin
+                    if (rx_sync) begin
+                        high_sample_count <= high_sample_count + 1'd1;
+                    end
+                end else if (oversampling_counter+1 == MID_SAMPLE+1) begin
+                    if (rx_sync) begin
+                        if (high_sample_count+1 >= 2'd2) begin
+                            majority_result <= 1'd1;
+                        end else begin
+                            majority_result <= 1'd0;
+                        end
+                    end else begin
+                        if (high_sample_count >= 2'd2) begin
+                            majority_result <= 1'd1;
+                        end else begin
+                            majority_result <= 1'd0;
+                        end
+                    end
+                    high_sample_count <= 1'd0;
+                    start_bit_checked <= 1'd1;
+                    majority_ready <= 1'd1;
+                end
+            end else if (sample_tick && state == DATA_BITS_STAGE) begin
+                if (data_bit_counter < DATA_BITS) begin
+                    if ((oversampling_counter+1 == MID_SAMPLE-1) || (oversampling_counter+1 == MID_SAMPLE-1)) begin
+                        if (rx_sync) begin
+                            high_sample_count <= high_sample_count + 1'd1;
+                        end
+                    end else if (oversampling_counter+1 == MID_SAMPLE+1) begin
+                        if (rx_sync) begin
+                            if (high_sample_count+1 >= 2'd2) begin
+                                majority_result <= 1'd1;
+                            end else begin
+                                majority_result <= 1'd0;
+                            end
+                        end else begin
+                            if (high_sample_count >= 2'd2) begin
+                                majority_result <= 1'd1;
+                            end else begin
+                                majority_result <= 1'd0;
+                            end
+                            high_sample_count <= 1'd0;
+                            majority_ready <= 1'd1;
+                        end
+                    end
+                end
             end
         end
     end
