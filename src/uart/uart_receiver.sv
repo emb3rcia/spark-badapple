@@ -56,9 +56,10 @@ module uart_receiver #(
     logic stop_bits_valid;
     logic parity_bit_valid;
     logic majority_ready;
+    logic data_parity;
 
     assign start_edge = rx_sync_previous && !rx_sync;
-
+    assign UART_RX_DATA = rx_data;
 
     initial begin
         if (OVERSAMPLING_RATE < 4) begin
@@ -116,7 +117,7 @@ module uart_receiver #(
                 end
             end
             DATA_BITS_STAGE: begin
-                if (data_bit_counter + 1 == DATA_BITS && majority_ready) begin
+                if (data_bit_counter == DATA_BITS-1 && majority_ready) begin
                     if (PARITY_MODE == 0) begin
                         next_state = STOP_BITS_STAGE;
                     end else if (PARITY_MODE == 1 || PARITY_MODE == 2) begin
@@ -241,7 +242,7 @@ module uart_receiver #(
                 end
             end else if (sample_tick && state == DATA_BITS_STAGE) begin
                 if (data_bit_counter < DATA_BITS) begin
-                    if ((oversampling_counter+1 == MID_SAMPLE-1) || (oversampling_counter+1 == MID_SAMPLE-1)) begin
+                    if ((oversampling_counter+1 == MID_SAMPLE-1) || (oversampling_counter+1 == MID_SAMPLE)) begin
                         if (rx_sync) begin
                             high_sample_count <= high_sample_count + 1'd1;
                         end
@@ -258,10 +259,24 @@ module uart_receiver #(
                             end else begin
                                 majority_result <= 1'd0;
                             end
-                            high_sample_count <= 1'd0;
-                            majority_ready <= 1'd1;
                         end
+                        high_sample_count <= 1'd0;
+                        majority_ready <= 1'd1;
                     end
+                end
+            end else if (sample_tick && state == PARITY_BIT_STAGE) begin
+                if (PARITY_MODE == 1) begin
+                    parity_bit_valid <= (majority_result == data_parity);
+                end else if (PARITY_MODE == 2) begin
+                    parity_bit_valid <= (majority_result == ~data_parity);
+                end
+            end
+            if (state == DATA_BITS_STAGE && majority_ready) begin
+                rx_data[data_bit_counter] <= majority_result;
+                data_parity <= data_parity ^ majority_result;
+
+                if (data_bit_counter < DATA_BITS-1) begin
+                    data_bit_counter <= data_bit_counter + 1'd1;
                 end
             end
         end
