@@ -209,6 +209,9 @@ module uart_receiver #(
             start_bit_checked <= 1'd0;
             data_bit_counter <= 1'd0;
             rx_data <= 1'd0;
+            data_parity <= 1'd0;
+            parity_bit_checked <= 1'd0;
+            parity_bit_valid <= 1'd0;
         end else begin
             majority_ready <= 1'd0;
             if (state == IDLE && next_state == START_BIT_STAGE) begin
@@ -217,6 +220,9 @@ module uart_receiver #(
                 majority_result <= 1'd0;
                 data_bit_counter <= 1'd0;
                 rx_data <= 1'd0;
+                data_parity <= 1'd0;
+                parity_bit_checked <= 1'd0;
+                parity_bit_valid <= 1'd0;
             end else if (sample_tick && state == START_BIT_STAGE) begin
                 if ((oversampling_counter+1 == MID_SAMPLE-1) || (oversampling_counter+1 == MID_SAMPLE)) begin
                     if (rx_sync) begin
@@ -265,10 +271,26 @@ module uart_receiver #(
                     end
                 end
             end else if (sample_tick && state == PARITY_BIT_STAGE) begin
-                if (PARITY_MODE == 1) begin
-                    parity_bit_valid <= (majority_result == data_parity);
-                end else if (PARITY_MODE == 2) begin
-                    parity_bit_valid <= (majority_result == ~data_parity);
+                if ((oversampling_counter+1 == MID_SAMPLE-1) || (oversampling_counter+1 == MID_SAMPLE)) begin
+                    if(rx_sync) begin
+                        high_sample_count <= high_sample_count + 1'd1;
+                    end
+                end else if (oversampling_counter+1 == MID_SAMPLE+1) begin
+                    if (rx_sync) begin
+                        if (high_sample_count+1 >= 2'd2) begin
+                            majority_result <= 1'd1;
+                        end else begin
+                            majority_result <= 1'd0;
+                        end
+                    end else begin
+                        if (high_sample_count >= 2'd2) begin
+                            majority_result <= 1'd1;
+                        end else begin
+                            majority_result <= 1'd0;
+                        end
+                    end
+                    high_sample_count <= 1'd0;
+                    majority_ready <= 1'd1;
                 end
             end
             if (state == DATA_BITS_STAGE && majority_ready) begin
@@ -278,6 +300,22 @@ module uart_receiver #(
                 if (data_bit_counter < DATA_BITS-1) begin
                     data_bit_counter <= data_bit_counter + 1'd1;
                 end
+            end
+            if (state == PARITY_BIT_STAGE && majority_ready) begin
+                if (PARITY_MODE == 1) begin
+                    if (data_parity == majority_result) begin
+                        parity_bit_valid <= 1'd1;
+                    end else begin
+                        parity_bit_valid <= 1'd0;
+                    end
+                end else if (PARITY_MODE == 2) begin
+                    if (data_parity != majority_result) begin
+                        parity_bit_valid <= 1'd1;
+                    end else begin
+                        parity_bit_valid <= 1'd0;
+                    end
+                end
+                parity_bit_checked <= 1'd1;
             end
         end
     end
